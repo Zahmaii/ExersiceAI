@@ -12,7 +12,6 @@ numpy==2.3.1
 matplotlib==3.10.3
 scikit-learn==1.7.0
 opencv-python==4.9.0.80
-mediapipe==0.10.9
 rich==14.0.0
 markdown-it-py==3.0.0
 pygments==2.19.2
