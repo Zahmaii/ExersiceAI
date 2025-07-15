@@ -1,7 +1,3 @@
-Here’s a complete `README.md` file tailored for your **Exercise AI Web App** project, perfect for uploading to GitHub:
-
----
-
 # 🏋️ Exercise AI Web App
 
 This is a multi-page Streamlit application that uses AI and machine learning to:
