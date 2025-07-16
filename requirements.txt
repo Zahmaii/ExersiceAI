@@ -16,4 +16,4 @@ rich==14.0.0
 markdown-it-py==3.0.0
 pygments==2.19.2
 mdurl==0.1.2
-mediapipe==0.10.9
+mediapipe
