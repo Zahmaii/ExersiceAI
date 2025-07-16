@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+from streamlit_webrtc import webrtc_streamer
 import mediapipe as mp
 import numpy as np
 import datetime
@@ -20,7 +21,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from streamlit_option_menu import option_menu
 
 selected = option_menu(
-    menu_title="Exercise AI Tools",  
+    menu_title="Exercise AI Tools | Exercise AI Tools",  
     options=["Analyzer", "Detection", "Prediction"],  
     icons=["clipboard-data", "graph-up-arrow", "calculator-fill"],  
     menu_icon="cast",
@@ -34,7 +35,7 @@ if selected == "Analyzer":
     # MediaPipe setup
     mp_drawing = mp.solutions.drawing_utils
     mp_pose = mp.solutions.pose
-
+    
     # Helper function to calculate joint angles
     def calculate_angle(a, b, c):
         a, b, c = np.array(a), np.array(b), np.array(c)
@@ -226,8 +227,8 @@ if selected == "Analyzer":
 
             st.success("Video analysis complete.")
 
-    
 elif selected == "Detection":
+
     # Constants
     CSV_FILE = "exercise_history.csv"
 
@@ -254,18 +255,16 @@ elif selected == "Detection":
 
     stop_session = st.sidebar.button("⛔ Stop Session")
 
-
     # Session state
-    if "run_camera" not in st.session_state:
-        st.session_state.run_camera = False
     if "counter" not in st.session_state:
         st.session_state.counter = 0
     if "stage" not in st.session_state:
         st.session_state.stage = None
     if "start_time" not in st.session_state:
         st.session_state.start_time = None
+    if "run_session" not in st.session_state:
+        st.session_state.run_session = False
 
-    # Angle calculation
     def calculate_angle(a, b, c):
         a = np.array(a)
         b = np.array(b)
@@ -279,119 +278,107 @@ elif selected == "Detection":
 
         return angle
 
-    # MediaPipe setup
     mp_drawing = mp.solutions.drawing_utils
     mp_pose = mp.solutions.pose
 
-    # Only run camera if exercise selected
     if exercise_type != "Select...":
         st.info(f"Start performing **{exercise_type}s** in front of your webcam.")
+        
+        if not st.session_state.run_session:
+            start_button = st.button("▶️ Start Session")
+            if start_button:
+                st.session_state.run_session = True
+                st.session_state.counter = 0
+                st.session_state.stage = None
+                st.session_state.start_time = time.time()
+        else:
+            if stop_session:
+                st.session_state.run_session = False
 
-        start_button = st.button("▶️ Start Camera")
+        def video_frame_callback(frame):
+            img = frame.to_ndarray(format="bgr24")
 
-        if start_button:
-            st.session_state.run_camera = True
-            st.session_state.counter = 0
-            st.session_state.stage = None
-            st.session_state.start_time = time.time()
-
-        FRAME_WINDOW = st.image([])
-
-        if st.session_state.run_camera and not stop_session:
-            cap = cv2.VideoCapture(0)
-
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
-                while st.session_state.run_camera and not stop_session:
-                    ret, frame = cap.read()
-                    if not ret:
-                        st.warning("Camera not accessible.")
-                        break
+                results = pose.process(img_rgb)
 
-                    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    image.flags.writeable = False
-                    results = pose.process(image)
-                    image.flags.writeable = True
-                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            if results.pose_landmarks:
+                landmarks = results.pose_landmarks.landmark
+                try:
+                    if exercise_type == "Squat":
+                        hip = [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x,
+                               landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y]
+                        knee = [landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x,
+                                landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
+                        ankle = [landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].x,
+                                 landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
+                        angle = calculate_angle(hip, knee, ankle)
+                        cv2.putText(img, str(int(angle)),
+                                    tuple(np.multiply(knee, [img.shape[1], img.shape[0]]).astype(int)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-                    try:
-                        landmarks = results.pose_landmarks.landmark
+                        if angle > 160:
+                            st.session_state.stage = "up"
+                        if angle < 120 and st.session_state.stage == 'up':
+                            st.session_state.stage = "down"
+                            st.session_state.counter += 1
 
-                        if exercise_type == "Squat":
-                            hip = [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x,
-                                landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y]
-                            knee = [landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x,
-                                    landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
-                            ankle = [landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].x,
-                                    landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
-                            angle = calculate_angle(hip, knee, ankle)
-                            cv2.putText(image, str(int(angle)),
-                                        tuple(np.multiply(knee, [640, 480]).astype(int)),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    elif exercise_type == "Push-up":
+                        shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+                                    landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+                        elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
+                                 landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+                        wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
+                                 landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+                        angle = calculate_angle(shoulder, elbow, wrist)
+                        cv2.putText(img, str(int(angle)),
+                                    tuple(np.multiply(elbow, [img.shape[1], img.shape[0]]).astype(int)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-                            if angle > 160:
-                                st.session_state.stage = "up"
-                            if angle < 120 and st.session_state.stage == 'up':
-                                st.session_state.stage = "down"
-                                st.session_state.counter += 1
+                        if angle > 160:
+                            st.session_state.stage = "up"
+                        if angle < 90 and st.session_state.stage == 'up':
+                            st.session_state.stage = "down"
+                            st.session_state.counter += 1
 
-                        elif exercise_type == "Push-up":
-                            shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
-                                        landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-                            elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
-                                    landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
-                            wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
-                                    landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
-                            angle = calculate_angle(shoulder, elbow, wrist)
-                            cv2.putText(image, str(int(angle)),
-                                        tuple(np.multiply(elbow, [640, 480]).astype(int)),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    mp_drawing.draw_landmarks(
+                        img, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
+                        mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2),
+                        mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2)
+                    )
+                except:
+                    pass
 
-                            if angle > 160:
-                                st.session_state.stage = "up"
-                            if angle < 90 and st.session_state.stage == 'up':
-                                st.session_state.stage = "down"
-                                st.session_state.counter += 1
+            # Timer
+            if enable_timer and st.session_state.start_time is not None:
+                elapsed = time.time() - st.session_state.start_time
+                remaining = int(duration - elapsed)
+                cv2.putText(img, f"Time left: {remaining}s", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                if remaining <= 0:
+                    st.session_state.run_session = False
 
-                        mp_drawing.draw_landmarks(
-                            image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
-                            mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2),
-                            mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2)
-                        )
+            # Counter box
+            cv2.rectangle(img, (0, 0), (250, 80), (245, 117, 16), -1)
+            cv2.putText(img, 'REPS', (15, 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+            cv2.putText(img, str(st.session_state.counter), (10, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
 
-                    except:
-                        pass
+            return img
 
-                    # Timer logic
-                    if enable_timer:
-                        elapsed = time.time() - st.session_state.start_time
-                        remaining = int(duration - elapsed)
-                        cv2.putText(image, f"Time left: {remaining}s", (380, 40),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-                        if remaining <= 0:
-                            stop_session = True
+        if st.session_state.run_session:
+            webrtc_streamer(
+                key="exercise-detection",
+                video_frame_callback=video_frame_callback,
+                media_stream_constraints={"video": True, "audio": False},
+            )
+        else:
+            st.write("Session stopped or not started.")
 
-                    # Draw counter
-                    cv2.rectangle(image, (0, 0), (250, 80), (245, 117, 16), -1)
-                    cv2.putText(image, 'REPS', (15, 25),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
-                    cv2.putText(image, str(st.session_state.counter), (10, 70),
-                                cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
-
-                    FRAME_WINDOW.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-
-                    if stop_session:
-                        break
-
-                cap.release()
-                cv2.destroyAllWindows()
-                st.session_state.run_camera = False
-
-        # Save to CSV
-        if stop_session and exercise_type != "Select...":
-            st.session_state.run_camera = False
+        # Save to CSV and show history when session ends
+        if not st.session_state.run_session and st.session_state.counter > 0:
             st.success(f"Session ended. Total reps counted: {st.session_state.counter}")
-
-            # Append to CSV
             df_new = pd.DataFrame({
                 "Date": [datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
                 "Exercise": [exercise_type],
@@ -403,7 +390,6 @@ elif selected == "Detection":
 
             st.write("✅ Session saved to history.")
 
-            # Show past history for current exercise
             st.subheader(f"📈 Past History for {exercise_type}")
             filtered = df_combined[df_combined["Exercise"] == exercise_type]
             st.dataframe(filtered.tail(10), use_container_width=True)
